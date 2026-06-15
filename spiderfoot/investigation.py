@@ -255,6 +255,19 @@ Investigation data (condensed JSON):
 """
 
 
+def check_ollama(host: str = DEFAULT_OLLAMA_HOST, timeout: int = 5) -> None:
+    """Verify that Ollama is reachable before starting analysis."""
+    req = urllib.request.Request(f"{host.rstrip('/')}/api/tags", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Ollama returned HTTP {resp.status}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"Ollama is not reachable at {host}. Start it with: ollama serve"
+        ) from e
+
+
 def call_ollama(
     prompt: str,
     model: str = DEFAULT_OLLAMA_MODEL,
@@ -329,12 +342,25 @@ def analyze_scans(
     model: str = DEFAULT_OLLAMA_MODEL,
     host: str = DEFAULT_OLLAMA_HOST,
     timeout: int = 1800,
+    on_stage=None,
 ) -> str:
+    def stage(name: str, message: str) -> None:
+        if on_stage:
+            on_stage(name, message)
+
+    stage("loading_scans", f"Loading {len(scan_ids)} scan(s) from database...")
     report = build_report_from_db(dbh, scan_ids)
     if not report["scans"]:
         raise ValueError("No matching scans found.")
 
+    stage(
+        "merging_scans",
+        f"Merged {report['summary']['event_count']} events from {report['summary']['scan_count']} scan(s)...",
+    )
     brief = condense_report(report)
+    stage("condensing_data", "Condensing account hits for LLM prompt...")
     prompt = build_analysis_prompt(brief, context)
+    stage("calling_ollama", f"Calling Ollama model '{model}' (watch CPU/GPU sensors)...")
     analysis = call_ollama(prompt, model=model, host=host, timeout=timeout)
+    stage("rendering_report", "Formatting analysis report...")
     return render_analysis_markdown(analysis, report, model, context)

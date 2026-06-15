@@ -1,6 +1,196 @@
 globalTypes = null;
 globalFilter = null;
 lastChecked = null;
+llmPollTimer = null;
+llmActiveJobId = null;
+
+var llmStageProgress = {
+    "queued": 10,
+    "checking_ollama": 20,
+    "loading_scans": 30,
+    "merging_scans": 45,
+    "condensing_data": 55,
+    "calling_ollama": 75,
+    "rendering_report": 90,
+    "saving_report": 95,
+    "complete": 100,
+    "failed": 100
+};
+
+function formatElapsed(seconds) {
+    var mins = Math.floor(seconds / 60);
+    var secs = seconds % 60;
+    return mins + ":" + (secs < 10 ? "0" : "") + secs;
+}
+
+function resetLLMModal() {
+    $("#llm-status-text").text("Starting...");
+    $("#llm-stage-text").text("queued");
+    $("#llm-elapsed-text").text("0:00");
+    $("#llm-progress-bar").css("width", "10%").addClass("active progress-bar-striped");
+    $("#llm-progress-label").text("10%");
+    $("#llm-result-box").hide().text("");
+    $("#llm-error-box").hide().text("");
+    $("#llm-close-btn").hide();
+    $("#llm-download-btn").hide();
+    $("#llm-modal-close").hide();
+    $("#llm-modal-title").text("LLM Analysis Running");
+    $("#llm-help-text").show();
+}
+
+function showLLMModal() {
+    resetLLMModal();
+    $("#llm-analysis-modal").modal({
+        backdrop: "static",
+        keyboard: false,
+        show: true
+    });
+}
+
+function updateLLMModal(status) {
+    var progress = llmStageProgress[status.stage] || 10;
+    $("#llm-status-text").text(status.message || status.status);
+    $("#llm-stage-text").text(status.stage);
+    $("#llm-elapsed-text").text(formatElapsed(status.elapsed || 0));
+    $("#llm-model-text").text(status.model || "cogito:32b");
+    $("#llm-scan-text").text(status.scan_count || 0);
+    $("#llm-progress-bar").css("width", progress + "%");
+    $("#llm-progress-label").text(progress + "%");
+}
+
+function finishLLMModalSuccess(status) {
+    if (llmPollTimer) {
+        clearInterval(llmPollTimer);
+        llmPollTimer = null;
+    }
+
+    updateLLMModal(status);
+    $("#llm-progress-bar").removeClass("active progress-bar-striped").addClass("progress-bar-success");
+    $("#llm-modal-title").text("LLM Analysis Complete");
+    $("#llm-help-text").hide();
+    $("#llm-result-box").show().html(
+        "Report saved to:<br><code>" + status.filepath + "</code><br><br>" +
+        "Browser download should start automatically."
+    );
+    $("#llm-download-btn").show().off("click").on("click", function() {
+        window.location.href = docroot + "/scananalyzellmdownload?id=" + llmActiveJobId;
+    });
+    $("#llm-close-btn").show();
+    $("#llm-modal-close").show();
+    $("#loader").fadeOut(500);
+}
+
+function finishLLMModalError(message) {
+    if (llmPollTimer) {
+        clearInterval(llmPollTimer);
+        llmPollTimer = null;
+    }
+
+    $("#llm-progress-bar").removeClass("active progress-bar-striped").addClass("progress-bar-danger").css("width", "100%");
+    $("#llm-progress-label").text("Failed");
+    $("#llm-modal-title").text("LLM Analysis Failed");
+    $("#llm-help-text").hide();
+    $("#llm-error-box").show().text(message);
+    $("#llm-close-btn").show();
+    $("#llm-modal-close").show();
+    $("#loader").fadeOut(500);
+}
+
+function pollLLMJob(jobId) {
+    $.ajax({
+        type: "GET",
+        url: docroot + "/scananalyzellmstatus",
+        data: { id: jobId },
+        dataType: "json",
+        cache: false
+    }).done(function(status) {
+        updateLLMModal(status);
+
+        if (status.status === "finished") {
+            window.location.href = docroot + "/scananalyzellmdownload?id=" + jobId;
+            finishLLMModalSuccess(status);
+            alertify.success("LLM analysis complete.");
+            sf.log("LLM analysis complete: " + status.filepath);
+            return;
+        }
+
+        if (status.status === "error") {
+            finishLLMModalError(status.error || "LLM analysis failed.");
+            alertify.error(status.error || "LLM analysis failed.");
+            sf.log("LLM analysis failed: " + (status.error || "unknown error"));
+        }
+    }).fail(function(xhr) {
+        var msg = xhr.responseText || "Could not poll LLM job status.";
+        finishLLMModalError(msg);
+        alertify.error(msg);
+    });
+}
+
+function analyzeSelectedLLM() {
+    ids = getSelected();
+
+    if (!ids) {
+        alertify.message("Could not analyze scans. No scans selected.");
+        return;
+    }
+
+    var context = window.prompt(
+        "Optional notes for the LLM (e.g. same person, known aliases):",
+        ""
+    );
+
+    if (context === null) {
+        return;
+    }
+
+    if (llmPollTimer) {
+        clearInterval(llmPollTimer);
+        llmPollTimer = null;
+    }
+
+    $("#loader").show();
+    showLLMModal();
+
+    $.ajax({
+        type: "POST",
+        url: docroot + "/scananalyzellmstart",
+        data: {
+            ids: ids.join(","),
+            context: context
+        },
+        dataType: "json",
+        cache: false
+    }).done(function(resp) {
+        if (!resp || resp.status !== "started" || !resp.job_id) {
+            finishLLMModalError("Could not start LLM analysis job.");
+            return;
+        }
+
+        llmActiveJobId = resp.job_id;
+        $("#llm-model-text").text(resp.model || "cogito:32b");
+        $("#llm-scan-text").text(resp.scan_count || ids.length);
+        sf.log("Started LLM analysis job: " + resp.job_id);
+
+        pollLLMJob(resp.job_id);
+        llmPollTimer = setInterval(function() {
+            pollLLMJob(resp.job_id);
+        }, 1500);
+    }).fail(function(xhr) {
+        var msg = "Could not start LLM analysis.";
+        if (xhr.responseText) {
+            try {
+                var err = JSON.parse(xhr.responseText);
+                if (err.error) {
+                    msg = err.error;
+                }
+            } catch (e) {
+                msg = xhr.responseText;
+            }
+        }
+        finishLLMModalError(msg);
+        alertify.error(msg);
+    });
+}
 
 function switchSelectAll() {
     if (!$("#checkall")[0].checked) {
@@ -92,66 +282,6 @@ function rerunSelected() {
 
     sf.log("Re-running scans: " + ids.join(','));
     window.location.href = docroot + '/rerunscanmulti?ids=' + ids.join(',');
-}
-
-function analyzeSelectedLLM() {
-    ids = getSelected();
-
-    if (!ids) {
-        alertify.message("Could not analyze scans. No scans selected.");
-        return;
-    }
-
-    var context = window.prompt(
-        "Optional notes for the LLM (e.g. same person, known aliases):",
-        ""
-    );
-
-    if (context === null) {
-        return;
-    }
-
-    $("#loader").show();
-    alertify.message("Analyzing " + ids.length + " scan(s) with LLM. This may take several minutes...");
-
-    $.ajax({
-        type: "POST",
-        url: docroot + "/scananalyzellm",
-        data: {
-            ids: ids.join(","),
-            context: context
-        },
-        dataType: "text",
-        timeout: 0
-    }).done(function(data, status, xhr) {
-        var filename = "SpiderFoot-LLM-Analysis.md";
-        var disposition = xhr.getResponseHeader("Content-Disposition");
-
-        if (disposition && disposition.indexOf("filename=") >= 0) {
-            filename = disposition.split("filename=")[1].replace(/"/g, "");
-        }
-
-        var blob = new Blob([data], { type: "text/markdown;charset=utf-8" });
-        var link = document.createElement("a");
-        link.href = window.URL.createObjectURL(blob);
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(link.href);
-
-        sf.log("LLM analysis downloaded: " + filename);
-        alertify.success("LLM analysis downloaded.");
-        $("#loader").fadeOut(500);
-    }).fail(function(xhr) {
-        var msg = "LLM analysis failed.";
-        if (xhr.responseText) {
-            msg = xhr.responseText;
-        }
-        alertify.error(msg);
-        sf.log("LLM analysis failed: " + msg);
-        $("#loader").fadeOut(500);
-    });
 }
 
 function exportSelected(type) {
@@ -349,6 +479,8 @@ function showlisttable(types, filter, data) {
         $("#btn-rerun").click(function() { rerunSelected(); });
         $("#btn-stop").click(function() { stopSelected(); });
         $("#btn-analyze-llm").click(function() { analyzeSelectedLLM(); });
+        $("#llm-close-btn").click(function() { $("#llm-analysis-modal").modal("hide"); });
+        $("#llm-modal-close").click(function() { $("#llm-analysis-modal").modal("hide"); });
         $("#checkall").click(function() { switchSelectAll(); });
     });
 }

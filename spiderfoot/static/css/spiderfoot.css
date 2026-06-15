@@ -201,3 +201,17 @@ input:checked + .slider:before {
 .download-button {
   padding: 6px 12px !important;
 }
+
+#btn-analyze-llm b {
+  font-size: 14px;
+  line-height: 1;
+}
+
+#llm-analysis-modal .modal-content {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+#llm-analysis-modal .modal-body code {
+  color: inherit;
+  background: rgba(0, 0, 0, 0.06);
+}

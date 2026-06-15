@@ -38,7 +38,8 @@ from sfscan import startSpiderFootScanner
 from spiderfoot import SpiderFootDb
 from spiderfoot import SpiderFootHelpers
 from spiderfoot import __version__
-from spiderfoot.investigation import analyze_scans, DEFAULT_OLLAMA_MODEL
+from spiderfoot.investigation import DEFAULT_OLLAMA_MODEL
+from spiderfoot.llm_jobs import llm_job_manager
 from spiderfoot.logger import logListenerSetup, logWorkerSetup
 
 mp.set_start_method("spawn", force=True)
@@ -663,51 +664,72 @@ class SpiderFootWebUi:
         return json.dumps(scaninfo).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellm(self: 'SpiderFootWebUi', ids: str, context: str = "", model: str = "") -> bytes:
-        """Merge selected scans and analyze them with a local Ollama model.
-
-        Args:
-            ids (str): comma separated list of scan IDs
-            context (str): optional investigator notes for the LLM
-            model (str): optional Ollama model name
-
-        Returns:
-            bytes: markdown analysis report
-        """
-        if not ids:
-            cherrypy.response.status = 400
-            cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-            return b"No scan IDs provided."
-
-        scan_ids = [scan_id.strip() for scan_id in ids.split(',') if scan_id.strip()]
-        if not scan_ids:
-            cherrypy.response.status = 400
-            cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-            return b"No valid scan IDs provided."
-
-        ollama_model = model.strip() if model else DEFAULT_OLLAMA_MODEL
+    def scananalyzellmstart(self: 'SpiderFootWebUi', ids: str, context: str = "", model: str = "") -> bytes:
+        """Start a background LLM analysis job for one or more scans."""
+        cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        cherrypy.response.headers['Pragma'] = "no-cache"
 
         try:
-            dbh = SpiderFootDb(self.config)
-            markdown = analyze_scans(
-                dbh,
+            if not ids:
+                cherrypy.response.status = 400
+                return json.dumps({"status": "error", "error": "No scan IDs provided."}).encode('utf-8')
+
+            scan_ids = [scan_id.strip() for scan_id in ids.split(',') if scan_id.strip()]
+            if not scan_ids:
+                cherrypy.response.status = 400
+                return json.dumps({"status": "error", "error": "No valid scan IDs provided."}).encode('utf-8')
+
+            llm_job_manager.cleanup_old_jobs()
+            ollama_model = model.strip() if model else DEFAULT_OLLAMA_MODEL
+            job_id = llm_job_manager.start(
+                self.config,
                 scan_ids,
                 context=context.strip(),
                 model=ollama_model,
             )
+            return json.dumps({
+                "status": "started",
+                "job_id": job_id,
+                "model": ollama_model,
+                "scan_count": len(scan_ids),
+            }).encode('utf-8')
         except Exception as e:
-            self.log.error(f"LLM analysis failed: {e}")
+            self.log.error(f"Failed to start LLM analysis: {e}", exc_info=True)
             cherrypy.response.status = 500
+            return json.dumps({"status": "error", "error": str(e)}).encode('utf-8')
+
+    @cherrypy.expose
+    def scananalyzellmstatus(self: 'SpiderFootWebUi', id: str) -> bytes:
+        """Poll background LLM analysis job status."""
+        cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        cherrypy.response.headers['Pragma'] = "no-cache"
+
+        if not id:
+            cherrypy.response.status = 400
+            return json.dumps({"status": "error", "error": "No job ID provided."}).encode('utf-8')
+
+        job = llm_job_manager.get(id)
+        if job is None:
+            cherrypy.response.status = 404
+            return json.dumps({"status": "error", "error": "Job not found."}).encode('utf-8')
+
+        return json.dumps(job).encode('utf-8')
+
+    @cherrypy.expose
+    def scananalyzellmdownload(self: 'SpiderFootWebUi', id: str) -> bytes:
+        """Download a finished LLM analysis job."""
+        if not id:
+            cherrypy.response.status = 400
             cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-            return str(e).encode('utf-8')
+            return b"No job ID provided."
 
-        if len(scan_ids) == 1:
-            scan = dbh.scanInstanceGet(scan_ids[0])
-            fname = f"{scan[0]}-LLM-Analysis.md" if scan else "SpiderFoot-LLM-Analysis.md"
-        else:
-            fname = "SpiderFoot-LLM-Analysis.md"
+        filename, markdown = llm_job_manager.get_result(id)
+        if not markdown:
+            cherrypy.response.status = 404
+            cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+            return b"Analysis not ready or job not found."
 
-        cherrypy.response.headers['Content-Disposition'] = f'attachment; filename="{fname}"'
+        cherrypy.response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
         cherrypy.response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
         cherrypy.response.headers['Pragma'] = "no-cache"
         return markdown.encode('utf-8')

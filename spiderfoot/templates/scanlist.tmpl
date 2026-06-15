@@ -42,4 +42,42 @@
 
 <iframe class='hidden' id='exportframe'></iframe>
 
+<div class="modal fade" id="llm-analysis-modal" tabindex="-1" role="dialog" data-backdrop="static" data-keyboard="false" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" id="llm-modal-close" aria-label="Close" style="display:none;">
+          <span aria-hidden="true">&times;</span>
+        </button>
+        <h4 class="modal-title" id="llm-modal-title">LLM Analysis Running</h4>
+      </div>
+      <div class="modal-body">
+        <div class="text-center" style="margin-bottom: 15px;">
+          <img src="${docroot}/static/img/loader.gif" alt="Loading">
+        </div>
+        <p><strong>Status:</strong> <span id="llm-status-text">Starting...</span></p>
+        <p><strong>Stage:</strong> <span id="llm-stage-text">queued</span></p>
+        <p><strong>Elapsed:</strong> <span id="llm-elapsed-text">0:00</span></p>
+        <p><strong>Model:</strong> <span id="llm-model-text">cogito:32b</span></p>
+        <p><strong>Scans:</strong> <span id="llm-scan-text">0</span></p>
+        <div class="progress" style="margin-top: 15px;">
+          <div id="llm-progress-bar" class="progress-bar progress-bar-striped active" role="progressbar" style="width: 10%;">
+            <span id="llm-progress-label">10%</span>
+          </div>
+        </div>
+        <p id="llm-help-text" class="text-muted" style="margin-top: 15px;">
+          Ollama should load the model and use CPU/GPU during the <code>calling_ollama</code> stage.
+          Watch your sensors while this modal stays open.
+        </p>
+        <div id="llm-result-box" class="alert alert-success" style="display:none; margin-top: 15px;"></div>
+        <div id="llm-error-box" class="alert alert-danger" style="display:none; margin-top: 15px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" id="llm-close-btn" style="display:none;">Close</button>
+        <button type="button" class="btn btn-primary" id="llm-download-btn" style="display:none;">Download Report</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <%include file="FOOTER.tmpl"/>
