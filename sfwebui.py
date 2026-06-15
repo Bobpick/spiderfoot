@@ -664,7 +664,7 @@ class SpiderFootWebUi:
         return json.dumps(scaninfo).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellmstart(self: 'SpiderFootWebUi', ids: str, context: str = "", model: str = "") -> bytes:
+    def scananalyzellmstart(self: 'SpiderFootWebUi', ids: str, context: str = "", model: str = "", _: str = "") -> bytes:
         """Start a background LLM analysis job for one or more scans."""
         cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
         cherrypy.response.headers['Pragma'] = "no-cache"
@@ -699,7 +699,7 @@ class SpiderFootWebUi:
             return json.dumps({"status": "error", "error": str(e)}).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellmping(self: 'SpiderFootWebUi') -> bytes:
+    def scananalyzellmping(self: 'SpiderFootWebUi', _: str = "") -> bytes:
         """Check whether LLM analysis endpoints are available."""
         cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
         cherrypy.response.headers['Pragma'] = "no-cache"
@@ -711,7 +711,7 @@ class SpiderFootWebUi:
         }).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellmstatus(self: 'SpiderFootWebUi', jobid: str = "", id: str = "") -> bytes:
+    def scananalyzellmstatus(self: 'SpiderFootWebUi', jobid: str = "", id: str = "", _: str = "") -> bytes:
         """Poll background LLM analysis job status."""
         cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
         cherrypy.response.headers['Pragma'] = "no-cache"
@@ -729,7 +729,7 @@ class SpiderFootWebUi:
         return json.dumps(job).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellmdownload(self: 'SpiderFootWebUi', jobid: str = "", id: str = "") -> bytes:
+    def scananalyzellmdownload(self: 'SpiderFootWebUi', jobid: str = "", id: str = "", _: str = "") -> bytes:
         """Download a finished LLM analysis job."""
         job_id = jobid or id
         if not job_id:
