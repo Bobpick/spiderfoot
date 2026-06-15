@@ -706,6 +706,8 @@ class SpiderFootWebUi:
         return json.dumps({
             "status": "ok",
             "model": DEFAULT_OLLAMA_MODEL,
+            "llm_version": 2,
+            "spiderfoot_version": __version__,
         }).encode('utf-8')
 
     @cherrypy.expose

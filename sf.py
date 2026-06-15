@@ -12,6 +12,7 @@
 # -------------------------------------------------------------------------------
 
 import argparse
+import atexit
 import logging
 import multiprocessing as mp
 import os
@@ -20,6 +21,7 @@ import random
 import signal
 import sys
 import time
+from contextlib import suppress
 from copy import deepcopy
 
 import cherrypy
@@ -32,7 +34,7 @@ from sfwebui import SpiderFootWebUi
 from spiderfoot import SpiderFootHelpers
 from spiderfoot import SpiderFootDb
 from spiderfoot import SpiderFootCorrelator
-from spiderfoot.logger import logListenerSetup, logWorkerSetup
+from spiderfoot.logger import close_logging_queue, logListenerSetup, logWorkerSetup
 from spiderfoot import __version__
 
 scanId = None
@@ -131,7 +133,8 @@ def main() -> None:
         sfConfig['__logging'] = False
 
     loggingQueue = mp.Queue()
-    logListenerSetup(loggingQueue, sfConfig)
+    log_listener = logListenerSetup(loggingQueue, sfConfig)
+    loggingQueue._spiderfoot_listener = log_listener
     logWorkerSetup(loggingQueue)
     log = logging.getLogger(f"spiderfoot.{__name__}")
 
@@ -458,6 +461,32 @@ def start_scan(sfConfig: dict, sfModules: dict, args, loggingQueue) -> None:
     return
 
 
+def _register_web_shutdown_handlers(sfConfig: dict, loggingQueue, log_listener) -> None:
+    """Abort stuck scans and release multiprocessing resources on exit."""
+    def cleanup() -> None:
+        with suppress(Exception):
+            dbh = SpiderFootDb(sfConfig)
+            for row in dbh.scanInstanceList():
+                scan_id = row[0]
+                status = row[6]
+                if status in ("RUNNING", "STARTING", "ABORT-REQUESTED"):
+                    dbh.scanInstanceSet(scan_id, status="ABORTED")
+        with suppress(Exception):
+            if log_listener is not None:
+                log_listener.stop()
+        close_logging_queue(loggingQueue)
+
+    def handle_shutdown(signum, frame) -> None:
+        log = logging.getLogger(f"spiderfoot.{__name__}")
+        log.info("Shutting down SpiderFoot web UI...")
+        cleanup()
+        sys.exit(0)
+
+    atexit.register(cleanup)
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+
 def start_web_server(sfWebUiConfig: dict, sfConfig: dict, loggingQueue=None) -> None:
     """Start the web server so you can start looking at results
 
@@ -582,6 +611,11 @@ def start_web_server(sfWebUiConfig: dict, sfConfig: dict, loggingQueue=None) -> 
 
     # Disable auto-reloading of content
     cherrypy.engine.autoreload.unsubscribe()
+
+    log_listener = None
+    if loggingQueue is not None:
+        log_listener = getattr(loggingQueue, "_spiderfoot_listener", None)
+    _register_web_shutdown_handlers(sfConfig, loggingQueue, log_listener)
 
     cherrypy.quickstart(SpiderFootWebUi(sfWebUiConfig, sfConfig, loggingQueue), script_name=web_root, config=conf)
 

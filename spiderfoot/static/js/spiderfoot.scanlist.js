@@ -80,31 +80,45 @@ function finishLLMModalSuccess(status) {
     $("#loader").fadeOut(500);
 }
 
-function parseLLMError(xhr, fallback) {
-    var msg = fallback || "LLM analysis failed.";
+function sanitizeLLMError(message, fallback) {
+    var msg = message || fallback || "LLM analysis failed.";
 
-    if (!xhr) {
-        return msg;
+    if (typeof msg !== "string") {
+        return fallback || "LLM analysis failed.";
     }
 
-    if (xhr.status === 404 || (xhr.responseText && xhr.responseText.indexOf("<html") >= 0)) {
+    if (msg.indexOf("<!DOCTYPE") >= 0 || msg.indexOf("<html") >= 0) {
         return "LLM endpoints not found. Restart SpiderFoot from ~/spiderfoot with: ./spiderfoot.sh";
+    }
+
+    if (msg.length > 500) {
+        return msg.substring(0, 500) + "...";
+    }
+
+    return msg;
+}
+
+function parseLLMError(xhr, fallback) {
+    if (!xhr) {
+        return sanitizeLLMError(null, fallback);
+    }
+
+    if (xhr.status === 404) {
+        return sanitizeLLMError("<html>", fallback);
     }
 
     if (xhr.responseText) {
         try {
             var err = JSON.parse(xhr.responseText);
             if (err.error) {
-                return err.error;
+                return sanitizeLLMError(err.error, fallback);
             }
         } catch (e) {
-            if (xhr.responseText.length < 300) {
-                return xhr.responseText;
-            }
+            return sanitizeLLMError(xhr.responseText, fallback);
         }
     }
 
-    return msg;
+    return sanitizeLLMError(null, fallback);
 }
 
 function finishLLMModalError(message) {
@@ -125,16 +139,15 @@ function finishLLMModalError(message) {
 
 function pollLLMJob(jobId) {
     $.ajax({
-        type: "POST",
-        url: docroot + "/scananalyzellmstatus",
-        data: { jobid: jobId },
+        type: "GET",
+        url: docroot + "/scananalyzellmstatus?jobid=" + encodeURIComponent(jobId),
         dataType: "json",
         cache: false
     }).done(function(status) {
         updateLLMModal(status);
 
         if (status.status === "finished") {
-            window.location.href = docroot + "/scananalyzellmdownload?jobid=" + jobId;
+            window.location.href = docroot + "/scananalyzellmdownload?jobid=" + encodeURIComponent(jobId);
             finishLLMModalSuccess(status);
             alertify.success("LLM analysis complete.");
             sf.log("LLM analysis complete: " + status.filepath);
@@ -142,7 +155,7 @@ function pollLLMJob(jobId) {
         }
 
         if (status.status === "error") {
-            var err = status.error || "LLM analysis failed.";
+            var err = sanitizeLLMError(status.error, "LLM analysis failed.");
             finishLLMModalError(err);
             alertify.error(err);
             sf.log("LLM analysis failed: " + err);
@@ -185,7 +198,12 @@ function analyzeSelectedLLM() {
         dataType: "json",
         cache: false
     }).done(function(ping) {
-        if (ping && ping.model) {
+        if (!ping || ping.status !== "ok" || !ping.llm_version) {
+            finishLLMModalError("LLM analysis is not available. Restart SpiderFoot from ~/spiderfoot with: ./spiderfoot.sh");
+            return;
+        }
+
+        if (ping.model) {
             $("#llm-model-text").text(ping.model);
         }
 

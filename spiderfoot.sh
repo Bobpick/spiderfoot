@@ -3,12 +3,24 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Stop any existing SpiderFoot web UI on port 5001
+# Stop any existing SpiderFoot web UI and orphaned scan workers
+if pgrep -f "python3 ./sf.py -l" >/dev/null 2>&1; then
+    echo "Stopping existing SpiderFoot web UI..."
+    pkill -TERM -f "python3 ./sf.py -l" >/dev/null 2>&1 || true
+    sleep 2
+fi
+
+if pgrep -f "startSpiderFootScanner" >/dev/null 2>&1; then
+    echo "Stopping orphaned SpiderFoot scan workers..."
+    pkill -TERM -f "startSpiderFootScanner" >/dev/null 2>&1 || true
+    sleep 1
+fi
+
 if command -v fuser >/dev/null 2>&1; then
     if fuser 5001/tcp >/dev/null 2>&1; then
-        echo "Stopping existing SpiderFoot instance on port 5001..."
+        echo "Freeing port 5001..."
         fuser -k 5001/tcp >/dev/null 2>&1 || true
-        sleep 2
+        sleep 1
     fi
 fi
 

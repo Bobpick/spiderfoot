@@ -159,3 +159,13 @@ def stop_listener(listener: 'logging.handlers.QueueListener') -> None:
     """
     with suppress(Exception):
         listener.stop()
+
+
+def close_logging_queue(logging_queue) -> None:
+    """Release multiprocessing queue semaphores on shutdown."""
+    if logging_queue is None:
+        return
+    with suppress(Exception):
+        logging_queue.close()
+    with suppress(Exception):
+        logging_queue.join_thread()
