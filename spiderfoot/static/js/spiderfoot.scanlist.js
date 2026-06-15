@@ -94,6 +94,66 @@ function rerunSelected() {
     window.location.href = docroot + '/rerunscanmulti?ids=' + ids.join(',');
 }
 
+function analyzeSelectedLLM() {
+    ids = getSelected();
+
+    if (!ids) {
+        alertify.message("Could not analyze scans. No scans selected.");
+        return;
+    }
+
+    var context = window.prompt(
+        "Optional notes for the LLM (e.g. same person, known aliases):",
+        ""
+    );
+
+    if (context === null) {
+        return;
+    }
+
+    $("#loader").show();
+    alertify.message("Analyzing " + ids.length + " scan(s) with LLM. This may take several minutes...");
+
+    $.ajax({
+        type: "POST",
+        url: docroot + "/scananalyzellm",
+        data: {
+            ids: ids.join(","),
+            context: context
+        },
+        dataType: "text",
+        timeout: 0
+    }).done(function(data, status, xhr) {
+        var filename = "SpiderFoot-LLM-Analysis.md";
+        var disposition = xhr.getResponseHeader("Content-Disposition");
+
+        if (disposition && disposition.indexOf("filename=") >= 0) {
+            filename = disposition.split("filename=")[1].replace(/"/g, "");
+        }
+
+        var blob = new Blob([data], { type: "text/markdown;charset=utf-8" });
+        var link = document.createElement("a");
+        link.href = window.URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(link.href);
+
+        sf.log("LLM analysis downloaded: " + filename);
+        alertify.success("LLM analysis downloaded.");
+        $("#loader").fadeOut(500);
+    }).fail(function(xhr) {
+        var msg = "LLM analysis failed.";
+        if (xhr.responseText) {
+            msg = xhr.responseText;
+        }
+        alertify.error(msg);
+        sf.log("LLM analysis failed: " + msg);
+        $("#loader").fadeOut(500);
+    });
+}
+
 function exportSelected(type) {
     ids = getSelected();
 
@@ -172,6 +232,7 @@ function showlisttable(types, filter, data) {
 
     buttons += "<div class='btn-group pull-right'>";
     buttons += "<button rel='tooltip' data-title='Refresh' id='btn-refresh' class='btn btn-default btn-success'><i class='glyphicon glyphicon-refresh glyphicon-white'></i></a>";
+    buttons += "<button rel='tooltip' data-title='Analyze with LLM' id='btn-analyze-llm' class='btn btn-default btn-success download-button'><b>A</b></button>";
     buttons += "<button rel='tooltip' data-toggle='dropdown' data-title='Export Selected' id='btn-export' class='btn btn-default btn-success dropdown-toggle download-button'><i class='glyphicon glyphicon-download-alt glyphicon-white'></i></button>";
     buttons += "<ul class='dropdown-menu'>";
     buttons += "<li><a href='javascript:exportSelected(\"csv\")'>CSV</a></li>";
@@ -287,6 +348,7 @@ function showlisttable(types, filter, data) {
         $("#btn-refresh").click(function() { reload(); });
         $("#btn-rerun").click(function() { rerunSelected(); });
         $("#btn-stop").click(function() { stopSelected(); });
+        $("#btn-analyze-llm").click(function() { analyzeSelectedLLM(); });
         $("#checkall").click(function() { switchSelectAll(); });
     });
 }

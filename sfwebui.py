@@ -38,6 +38,7 @@ from sfscan import startSpiderFootScanner
 from spiderfoot import SpiderFootDb
 from spiderfoot import SpiderFootHelpers
 from spiderfoot import __version__
+from spiderfoot.investigation import analyze_scans, DEFAULT_OLLAMA_MODEL
 from spiderfoot.logger import logListenerSetup, logWorkerSetup
 
 mp.set_start_method("spawn", force=True)
@@ -660,6 +661,56 @@ class SpiderFootWebUi:
         cherrypy.response.headers['Content-Type'] = "application/json; charset=utf-8"
         cherrypy.response.headers['Pragma'] = "no-cache"
         return json.dumps(scaninfo).encode('utf-8')
+
+    @cherrypy.expose
+    def scananalyzellm(self: 'SpiderFootWebUi', ids: str, context: str = "", model: str = "") -> bytes:
+        """Merge selected scans and analyze them with a local Ollama model.
+
+        Args:
+            ids (str): comma separated list of scan IDs
+            context (str): optional investigator notes for the LLM
+            model (str): optional Ollama model name
+
+        Returns:
+            bytes: markdown analysis report
+        """
+        if not ids:
+            cherrypy.response.status = 400
+            cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+            return b"No scan IDs provided."
+
+        scan_ids = [scan_id.strip() for scan_id in ids.split(',') if scan_id.strip()]
+        if not scan_ids:
+            cherrypy.response.status = 400
+            cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+            return b"No valid scan IDs provided."
+
+        ollama_model = model.strip() if model else DEFAULT_OLLAMA_MODEL
+
+        try:
+            dbh = SpiderFootDb(self.config)
+            markdown = analyze_scans(
+                dbh,
+                scan_ids,
+                context=context.strip(),
+                model=ollama_model,
+            )
+        except Exception as e:
+            self.log.error(f"LLM analysis failed: {e}")
+            cherrypy.response.status = 500
+            cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+            return str(e).encode('utf-8')
+
+        if len(scan_ids) == 1:
+            scan = dbh.scanInstanceGet(scan_ids[0])
+            fname = f"{scan[0]}-LLM-Analysis.md" if scan else "SpiderFoot-LLM-Analysis.md"
+        else:
+            fname = "SpiderFoot-LLM-Analysis.md"
+
+        cherrypy.response.headers['Content-Disposition'] = f'attachment; filename="{fname}"'
+        cherrypy.response.headers['Content-Type'] = 'text/markdown; charset=utf-8'
+        cherrypy.response.headers['Pragma'] = "no-cache"
+        return markdown.encode('utf-8')
 
     @cherrypy.expose
     def scanviz(self: 'SpiderFootWebUi', id: str, gexf: str = "0") -> str:
