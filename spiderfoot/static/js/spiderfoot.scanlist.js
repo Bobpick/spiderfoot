@@ -167,6 +167,77 @@ function pollLLMJob(jobId) {
     });
 }
 
+function startLLMAnalysis(ids, context, ping) {
+    if (ping.model) {
+        $("#llm-model-text").text(ping.model);
+    }
+
+    $.ajax({
+        type: "POST",
+        url: docroot + "/scananalyzellmstart",
+        data: {
+            ids: ids.join(","),
+            context: context
+        },
+        dataType: "json",
+        cache: false
+    }).done(function(resp) {
+        if (!resp || resp.status !== "started" || !resp.job_id) {
+            finishLLMModalError("Could not start LLM analysis job.");
+            return;
+        }
+
+        llmActiveJobId = resp.job_id;
+        $("#llm-model-text").text(resp.model || "cogito:32b");
+        $("#llm-scan-text").text(resp.scan_count || ids.length);
+        sf.log("Started LLM analysis job: " + resp.job_id);
+
+        pollLLMJob(resp.job_id);
+        llmPollTimer = setInterval(function() {
+            pollLLMJob(resp.job_id);
+        }, 1500);
+    }).fail(function(xhr) {
+        var msg = parseLLMError(xhr, "Could not start LLM analysis.");
+        finishLLMModalError(msg);
+        alertify.error(msg);
+    });
+}
+
+function pingLLMServer(attempt, onSuccess, onFailure) {
+    $("#llm-status-text").text("Checking LLM endpoint (attempt " + attempt + ")...");
+
+    $.ajax({
+        type: "GET",
+        url: docroot + "/scananalyzellmping",
+        dataType: "json",
+        cache: false,
+        timeout: 5000
+    }).done(function(ping) {
+        if (ping && ping.status === "ok" && ping.llm_version) {
+            onSuccess(ping);
+            return;
+        }
+
+        if (attempt < 6) {
+            window.setTimeout(function() {
+                pingLLMServer(attempt + 1, onSuccess, onFailure);
+            }, 1000);
+            return;
+        }
+
+        onFailure(null, "This SpiderFoot instance does not include LLM analysis. Launch the desktop app again or run ~/spiderfoot/spiderfoot.sh, then hard-refresh this page (Ctrl+Shift+R).");
+    }).fail(function(xhr) {
+        if (attempt < 6) {
+            window.setTimeout(function() {
+                pingLLMServer(attempt + 1, onSuccess, onFailure);
+            }, 1000);
+            return;
+        }
+
+        onFailure(xhr, parseLLMError(xhr, "LLM analysis is not available on this SpiderFoot instance."));
+    });
+}
+
 function analyzeSelectedLLM() {
     ids = getSelected();
 
@@ -191,53 +262,9 @@ function analyzeSelectedLLM() {
 
     $("#loader").show();
     showLLMModal();
-
-    $.ajax({
-        type: "GET",
-        url: docroot + "/scananalyzellmping",
-        dataType: "json",
-        cache: false
-    }).done(function(ping) {
-        if (!ping || ping.status !== "ok" || !ping.llm_version) {
-            finishLLMModalError("LLM analysis is not available. Restart SpiderFoot from ~/spiderfoot with: ./spiderfoot.sh");
-            return;
-        }
-
-        if (ping.model) {
-            $("#llm-model-text").text(ping.model);
-        }
-
-        $.ajax({
-            type: "POST",
-            url: docroot + "/scananalyzellmstart",
-            data: {
-                ids: ids.join(","),
-                context: context
-            },
-            dataType: "json",
-            cache: false
-        }).done(function(resp) {
-            if (!resp || resp.status !== "started" || !resp.job_id) {
-                finishLLMModalError("Could not start LLM analysis job.");
-                return;
-            }
-
-            llmActiveJobId = resp.job_id;
-            $("#llm-model-text").text(resp.model || "cogito:32b");
-            $("#llm-scan-text").text(resp.scan_count || ids.length);
-            sf.log("Started LLM analysis job: " + resp.job_id);
-
-            pollLLMJob(resp.job_id);
-            llmPollTimer = setInterval(function() {
-                pollLLMJob(resp.job_id);
-            }, 1500);
-        }).fail(function(xhr) {
-            var msg = parseLLMError(xhr, "Could not start LLM analysis.");
-            finishLLMModalError(msg);
-            alertify.error(msg);
-        });
-    }).fail(function(xhr) {
-        var msg = parseLLMError(xhr, "LLM analysis is not available on this SpiderFoot instance.");
+    pingLLMServer(1, function(ping) {
+        startLLMAnalysis(ids, context, ping);
+    }, function(xhr, msg) {
         finishLLMModalError(msg);
         alertify.error(msg);
     });
