@@ -73,11 +73,38 @@ function finishLLMModalSuccess(status) {
         "Browser download should start automatically."
     );
     $("#llm-download-btn").show().off("click").on("click", function() {
-        window.location.href = docroot + "/scananalyzellmdownload?id=" + llmActiveJobId;
+        window.location.href = docroot + "/scananalyzellmdownload?jobid=" + llmActiveJobId;
     });
     $("#llm-close-btn").show();
     $("#llm-modal-close").show();
     $("#loader").fadeOut(500);
+}
+
+function parseLLMError(xhr, fallback) {
+    var msg = fallback || "LLM analysis failed.";
+
+    if (!xhr) {
+        return msg;
+    }
+
+    if (xhr.status === 404 || (xhr.responseText && xhr.responseText.indexOf("<html") >= 0)) {
+        return "LLM endpoints not found. Restart SpiderFoot from ~/spiderfoot with: ./spiderfoot.sh";
+    }
+
+    if (xhr.responseText) {
+        try {
+            var err = JSON.parse(xhr.responseText);
+            if (err.error) {
+                return err.error;
+            }
+        } catch (e) {
+            if (xhr.responseText.length < 300) {
+                return xhr.responseText;
+            }
+        }
+    }
+
+    return msg;
 }
 
 function finishLLMModalError(message) {
@@ -98,16 +125,16 @@ function finishLLMModalError(message) {
 
 function pollLLMJob(jobId) {
     $.ajax({
-        type: "GET",
+        type: "POST",
         url: docroot + "/scananalyzellmstatus",
-        data: { id: jobId },
+        data: { jobid: jobId },
         dataType: "json",
         cache: false
     }).done(function(status) {
         updateLLMModal(status);
 
         if (status.status === "finished") {
-            window.location.href = docroot + "/scananalyzellmdownload?id=" + jobId;
+            window.location.href = docroot + "/scananalyzellmdownload?jobid=" + jobId;
             finishLLMModalSuccess(status);
             alertify.success("LLM analysis complete.");
             sf.log("LLM analysis complete: " + status.filepath);
@@ -115,12 +142,13 @@ function pollLLMJob(jobId) {
         }
 
         if (status.status === "error") {
-            finishLLMModalError(status.error || "LLM analysis failed.");
-            alertify.error(status.error || "LLM analysis failed.");
-            sf.log("LLM analysis failed: " + (status.error || "unknown error"));
+            var err = status.error || "LLM analysis failed.";
+            finishLLMModalError(err);
+            alertify.error(err);
+            sf.log("LLM analysis failed: " + err);
         }
     }).fail(function(xhr) {
-        var msg = xhr.responseText || "Could not poll LLM job status.";
+        var msg = parseLLMError(xhr, "Could not poll LLM job status.");
         finishLLMModalError(msg);
         alertify.error(msg);
     });
@@ -152,41 +180,46 @@ function analyzeSelectedLLM() {
     showLLMModal();
 
     $.ajax({
-        type: "POST",
-        url: docroot + "/scananalyzellmstart",
-        data: {
-            ids: ids.join(","),
-            context: context
-        },
+        type: "GET",
+        url: docroot + "/scananalyzellmping",
         dataType: "json",
         cache: false
-    }).done(function(resp) {
-        if (!resp || resp.status !== "started" || !resp.job_id) {
-            finishLLMModalError("Could not start LLM analysis job.");
-            return;
+    }).done(function(ping) {
+        if (ping && ping.model) {
+            $("#llm-model-text").text(ping.model);
         }
 
-        llmActiveJobId = resp.job_id;
-        $("#llm-model-text").text(resp.model || "cogito:32b");
-        $("#llm-scan-text").text(resp.scan_count || ids.length);
-        sf.log("Started LLM analysis job: " + resp.job_id);
-
-        pollLLMJob(resp.job_id);
-        llmPollTimer = setInterval(function() {
-            pollLLMJob(resp.job_id);
-        }, 1500);
-    }).fail(function(xhr) {
-        var msg = "Could not start LLM analysis.";
-        if (xhr.responseText) {
-            try {
-                var err = JSON.parse(xhr.responseText);
-                if (err.error) {
-                    msg = err.error;
-                }
-            } catch (e) {
-                msg = xhr.responseText;
+        $.ajax({
+            type: "POST",
+            url: docroot + "/scananalyzellmstart",
+            data: {
+                ids: ids.join(","),
+                context: context
+            },
+            dataType: "json",
+            cache: false
+        }).done(function(resp) {
+            if (!resp || resp.status !== "started" || !resp.job_id) {
+                finishLLMModalError("Could not start LLM analysis job.");
+                return;
             }
-        }
+
+            llmActiveJobId = resp.job_id;
+            $("#llm-model-text").text(resp.model || "cogito:32b");
+            $("#llm-scan-text").text(resp.scan_count || ids.length);
+            sf.log("Started LLM analysis job: " + resp.job_id);
+
+            pollLLMJob(resp.job_id);
+            llmPollTimer = setInterval(function() {
+                pollLLMJob(resp.job_id);
+            }, 1500);
+        }).fail(function(xhr) {
+            var msg = parseLLMError(xhr, "Could not start LLM analysis.");
+            finishLLMModalError(msg);
+            alertify.error(msg);
+        });
+    }).fail(function(xhr) {
+        var msg = parseLLMError(xhr, "LLM analysis is not available on this SpiderFoot instance.");
         finishLLMModalError(msg);
         alertify.error(msg);
     });

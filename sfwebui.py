@@ -699,31 +699,43 @@ class SpiderFootWebUi:
             return json.dumps({"status": "error", "error": str(e)}).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellmstatus(self: 'SpiderFootWebUi', id: str) -> bytes:
+    def scananalyzellmping(self: 'SpiderFootWebUi') -> bytes:
+        """Check whether LLM analysis endpoints are available."""
+        cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        cherrypy.response.headers['Pragma'] = "no-cache"
+        return json.dumps({
+            "status": "ok",
+            "model": DEFAULT_OLLAMA_MODEL,
+        }).encode('utf-8')
+
+    @cherrypy.expose
+    def scananalyzellmstatus(self: 'SpiderFootWebUi', jobid: str = "", id: str = "") -> bytes:
         """Poll background LLM analysis job status."""
         cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
         cherrypy.response.headers['Pragma'] = "no-cache"
 
-        if not id:
+        job_id = jobid or id
+        if not job_id:
             cherrypy.response.status = 400
             return json.dumps({"status": "error", "error": "No job ID provided."}).encode('utf-8')
 
-        job = llm_job_manager.get(id)
+        job = llm_job_manager.get(job_id)
         if job is None:
-            cherrypy.response.status = 404
+            cherrypy.response.status = 200
             return json.dumps({"status": "error", "error": "Job not found."}).encode('utf-8')
 
         return json.dumps(job).encode('utf-8')
 
     @cherrypy.expose
-    def scananalyzellmdownload(self: 'SpiderFootWebUi', id: str) -> bytes:
+    def scananalyzellmdownload(self: 'SpiderFootWebUi', jobid: str = "", id: str = "") -> bytes:
         """Download a finished LLM analysis job."""
-        if not id:
+        job_id = jobid or id
+        if not job_id:
             cherrypy.response.status = 400
             cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
             return b"No job ID provided."
 
-        filename, markdown = llm_job_manager.get_result(id)
+        filename, markdown = llm_job_manager.get_result(job_id)
         if not markdown:
             cherrypy.response.status = 404
             cherrypy.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
