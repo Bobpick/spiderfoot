@@ -27,15 +27,154 @@ function resetLLMModal() {
     $("#llm-status-text").text("Starting...");
     $("#llm-stage-text").text("queued");
     $("#llm-elapsed-text").text("0:00");
-    $("#llm-progress-bar").css("width", "10%").addClass("active progress-bar-striped");
+    $("#llm-progress-bar").css("width", "10%").removeClass("progress-bar-success progress-bar-danger").addClass("active progress-bar-striped");
     $("#llm-progress-label").text("10%");
     $("#llm-result-box").hide().text("");
+    $("#llm-report-panel").hide();
+    $("#llm-report-content").empty();
+    $("#llm-report-path").text("");
+    $("#llm-report-download-link").attr("href", "#");
     $("#llm-error-box").hide().text("");
     $("#llm-close-btn").hide();
     $("#llm-download-btn").hide();
     $("#llm-modal-close").hide();
     $("#llm-modal-title").text("LLM Analysis Running");
     $("#llm-help-text").show();
+    $("#llm-analysis-modal .text-center img").show();
+}
+
+function escapeHtml(text) {
+    return $("<div/>").text(text).html();
+}
+
+function renderSimpleMarkdown(markdown) {
+    if (!markdown) {
+        return "<p><em>No report content.</em></p>";
+    }
+
+    var lines = markdown.split("\n");
+    var html = "";
+    var inCode = false;
+    var codeLines = [];
+    var inList = false;
+
+    function closeList() {
+        if (inList) {
+            html += "</ul>";
+            inList = false;
+        }
+    }
+
+    function flushCode() {
+        if (codeLines.length) {
+            html += "<pre><code>" + escapeHtml(codeLines.join("\n")) + "</code></pre>";
+            codeLines = [];
+        }
+    }
+
+    lines.forEach(function(line) {
+        var trimmed = line.trim();
+
+        if (trimmed.indexOf("```") === 0) {
+            closeList();
+            if (inCode) {
+                flushCode();
+                inCode = false;
+            } else {
+                inCode = true;
+            }
+            return;
+        }
+
+        if (inCode) {
+            codeLines.push(line);
+            return;
+        }
+
+        if (!trimmed) {
+            closeList();
+            return;
+        }
+
+        if (trimmed.indexOf("### ") === 0) {
+            closeList();
+            html += "<h3>" + escapeHtml(trimmed.substring(4)) + "</h3>";
+            return;
+        }
+
+        if (trimmed.indexOf("## ") === 0) {
+            closeList();
+            html += "<h2>" + escapeHtml(trimmed.substring(3)) + "</h2>";
+            return;
+        }
+
+        if (trimmed.indexOf("# ") === 0) {
+            closeList();
+            html += "<h1>" + escapeHtml(trimmed.substring(2)) + "</h1>";
+            return;
+        }
+
+        if (trimmed.indexOf("- ") === 0 || trimmed.indexOf("* ") === 0) {
+            if (!inList) {
+                html += "<ul>";
+                inList = true;
+            }
+            html += "<li>" + formatInlineMarkdown(trimmed.substring(2)) + "</li>";
+            return;
+        }
+
+        closeList();
+        html += "<p>" + formatInlineMarkdown(trimmed) + "</p>";
+    });
+
+    flushCode();
+    closeList();
+    return html;
+}
+
+function formatInlineMarkdown(text) {
+    var escaped = escapeHtml(text);
+    escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
+    escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    escaped = escaped.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return escaped;
+}
+
+function loadLLMReportInModal(jobId, status) {
+    var downloadUrl = docroot + "/scananalyzellmdownload?jobid=" + encodeURIComponent(jobId);
+
+    $("#llm-report-panel").show();
+    $("#llm-report-content").html("<p><em>Loading report...</em></p>");
+    $("#llm-report-download-link")
+        .attr("href", downloadUrl)
+        .text(status.filename || "Download report");
+    $("#llm-report-path").text(status.filepath || "");
+
+    $.ajax({
+        type: "GET",
+        url: docroot + "/scananalyzellmview?jobid=" + encodeURIComponent(jobId),
+        dataType: "json",
+        cache: false
+    }).done(function(view) {
+        if (!view || view.status !== "ok" || !view.markdown) {
+            $("#llm-report-content").html("<p class='text-danger'>Could not load report preview.</p>");
+            return;
+        }
+
+        if (view.filepath) {
+            $("#llm-report-path").text(view.filepath);
+        }
+
+        if (view.filename) {
+            $("#llm-report-download-link").text(view.filename);
+        }
+
+        $("#llm-report-content").html(renderSimpleMarkdown(view.markdown));
+    }).fail(function(xhr) {
+        var msg = parseLLMError(xhr, "Could not load report preview.");
+        $("#llm-report-content").html("<p class='text-danger'>" + escapeHtml(msg) + "</p>");
+    });
 }
 
 function showLLMModal() {
@@ -68,13 +207,17 @@ function finishLLMModalSuccess(status) {
     $("#llm-progress-bar").removeClass("active progress-bar-striped").addClass("progress-bar-success");
     $("#llm-modal-title").text("LLM Analysis Complete");
     $("#llm-help-text").hide();
+    $("#llm-analysis-modal .text-center img").hide();
     $("#llm-result-box").show().html(
-        "Report saved to:<br><code>" + status.filepath + "</code><br><br>" +
-        "Browser download should start automatically."
+        "Analysis finished. Review the report below or use the download link."
     );
+
+    var downloadUrl = docroot + "/scananalyzellmdownload?jobid=" + encodeURIComponent(llmActiveJobId);
     $("#llm-download-btn").show().off("click").on("click", function() {
-        window.location.href = docroot + "/scananalyzellmdownload?jobid=" + llmActiveJobId;
+        window.location.href = downloadUrl;
     });
+
+    loadLLMReportInModal(llmActiveJobId, status);
     $("#llm-close-btn").show();
     $("#llm-modal-close").show();
     $("#loader").fadeOut(500);
@@ -147,7 +290,6 @@ function pollLLMJob(jobId) {
         updateLLMModal(status);
 
         if (status.status === "finished") {
-            window.location.href = docroot + "/scananalyzellmdownload?jobid=" + encodeURIComponent(jobId);
             finishLLMModalSuccess(status);
             alertify.success("LLM analysis complete.");
             sf.log("LLM analysis complete: " + status.filepath);

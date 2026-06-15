@@ -215,3 +215,53 @@ input:checked + .slider:before {
   color: inherit;
   background: rgba(0, 0, 0, 0.06);
 }
+
+#llm-analysis-modal .llm-report-toolbar {
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+#llm-analysis-modal .llm-report-toolbar a {
+  margin-left: 6px;
+}
+
+#llm-analysis-modal .llm-report-content {
+  max-height: 55vh;
+  overflow: auto;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  padding: 14px 16px;
+  background: rgba(0, 0, 0, 0.03);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#llm-analysis-modal .llm-report-content h1,
+#llm-analysis-modal .llm-report-content h2,
+#llm-analysis-modal .llm-report-content h3 {
+  margin-top: 1.2em;
+  margin-bottom: 0.6em;
+}
+
+#llm-analysis-modal .llm-report-content h1:first-child,
+#llm-analysis-modal .llm-report-content h2:first-child,
+#llm-analysis-modal .llm-report-content h3:first-child {
+  margin-top: 0;
+}
+
+#llm-analysis-modal .llm-report-content pre,
+#llm-analysis-modal .llm-report-content code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#llm-analysis-modal .llm-report-content pre {
+  padding: 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+#llm-analysis-modal .llm-report-content ul,
+#llm-analysis-modal .llm-report-content ol {
+  padding-left: 1.4em;
+}

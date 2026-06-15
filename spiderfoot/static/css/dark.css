@@ -195,6 +195,20 @@ tr.danger {
   color: #fff;
 }
 
+#llm-analysis-modal .llm-report-content {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+#llm-analysis-modal .llm-report-content pre {
+  background: #1f1f1f;
+}
+
+#llm-analysis-modal .modal-body code,
+#llm-analysis-modal .llm-report-content code {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /* Modal overrides */
 .ajs-dimmer {
   background-color: #000 !important;

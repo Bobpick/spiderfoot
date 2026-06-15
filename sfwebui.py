@@ -749,6 +749,29 @@ class SpiderFootWebUi:
         return markdown.encode('utf-8')
 
     @cherrypy.expose
+    def scananalyzellmview(self: 'SpiderFootWebUi', jobid: str = "", id: str = "", _: str = "") -> bytes:
+        """Return finished LLM analysis report for inline display."""
+        cherrypy.response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        cherrypy.response.headers['Pragma'] = "no-cache"
+
+        job_id = jobid or id
+        if not job_id:
+            cherrypy.response.status = 400
+            return json.dumps({"status": "error", "error": "No job ID provided."}).encode('utf-8')
+
+        view = llm_job_manager.get_view(job_id)
+        if view is None:
+            cherrypy.response.status = 404
+            return json.dumps({"status": "error", "error": "Analysis not ready or job not found."}).encode('utf-8')
+
+        return json.dumps({
+            "status": "ok",
+            "filename": view.get("filename"),
+            "filepath": view.get("filepath"),
+            "markdown": view.get("markdown"),
+        }).encode('utf-8')
+
+    @cherrypy.expose
     def scanviz(self: 'SpiderFootWebUi', id: str, gexf: str = "0") -> str:
         """Export entities from scan results for visualising.
 

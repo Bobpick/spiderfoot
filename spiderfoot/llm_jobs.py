@@ -72,6 +72,17 @@ class LLMJobManager:
                 return None, None
             return job.get("filename"), job.get("result")
 
+    def get_view(self, job_id: str) -> dict:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job["status"] != "finished":
+                return None
+            return {
+                "filename": job.get("filename"),
+                "filepath": job.get("filepath"),
+                "markdown": job.get("result"),
+            }
+
     def _update(self, job_id: str, **fields) -> None:
         with self._lock:
             job = self._jobs.get(job_id)
