@@ -31,6 +31,7 @@ PLACEHOLDER_MARKERS = (
 
 HIGH_VALUE_PLATFORMS = (
     "venmo",
+    "cashapp",
     "instagram",
     "tiktok",
     "github",
@@ -109,6 +110,71 @@ def parse_event_blob(data: str) -> dict:
     return {}
 
 
+def cashapp_profile_url(username: str) -> str:
+    cashtag = (username or "").lstrip("$").strip()
+    return f"https://cash.app/${cashtag}"
+
+
+def cashapp_username_from_url(url: str) -> str:
+    match = re.search(r"cash\.app/\$?([A-Za-z0-9_\-]+)", url or "", re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def cashapp_profile_from_html(html: str) -> dict:
+    if not html:
+        return None
+
+    match = re.search(r"var profile\s*=\s*(\{.*?\});", html, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+
+def cashapp_avatar_url(profile: dict) -> str:
+    if not isinstance(profile, dict):
+        return ""
+    avatar = profile.get("avatar") or {}
+    if isinstance(avatar, dict):
+        return (avatar.get("image_url") or "").strip()
+    return ""
+
+
+def is_cashapp_placeholder(profile: dict) -> bool:
+    image_url = cashapp_avatar_url(profile)
+    if not image_url:
+        return True
+    return is_placeholder_image(image_url)
+
+
+def cashapp_capture_from_raw(data: str, scan_id: str, scan_name: str) -> dict:
+    payload = parse_event_blob(data)
+    image_url = payload.get("image_url") or cashapp_avatar_url(payload)
+    if not image_url or is_placeholder_image(image_url):
+        return None
+
+    username = (
+        payload.get("username")
+        or cashapp_username_from_url(payload.get("profile_url", ""))
+        or scan_name
+    )
+    profile_url = payload.get("profile_url") or cashapp_profile_url(username)
+
+    return {
+        "platform": "cashapp",
+        "username": username,
+        "display_name": payload.get("display_name"),
+        "profile_url": profile_url,
+        "image_url": image_url,
+        "scan_id": scan_id,
+        "scan_name": scan_name,
+        "source_module": "sfp_cashapp",
+    }
+
+
 def venmo_capture_from_raw(data: str, scan_id: str, scan_name: str) -> dict:
     payload = parse_event_blob(data)
     image_url = payload.get("profile_picture_url") or payload.get("profilePictureUrl")
@@ -151,10 +217,10 @@ def profile_capture_from_account(url: str, scan_id: str, scan_name: str, platfor
         return None
 
     platform = platform or platform_from_url(url)
-    if platform not in HIGH_VALUE_PLATFORMS and "venmo" not in platform:
+    if platform not in HIGH_VALUE_PLATFORMS:
         return None
 
-    return {
+    record = {
         "platform": platform,
         "profile_url": url,
         "image_url": None,
@@ -162,6 +228,12 @@ def profile_capture_from_account(url: str, scan_id: str, scan_name: str, platfor
         "scan_name": scan_name,
         "source_module": "sfp_profilecapture",
     }
+
+    if platform == "cashapp":
+        username = cashapp_username_from_url(url)
+        record["username"] = username or scan_name
+
+    return record
 
 
 def _image_from_bytes(content: bytes):
@@ -255,6 +327,10 @@ def collect_capture_candidates(events: list) -> list:
 
         record = None
         if event_type == "RAW_RIR_DATA" and (
+            module == "sfp_cashapp" or '"avatar"' in data or "'avatar'" in data
+        ):
+            record = cashapp_capture_from_raw(data, scan_id, scan_name)
+        elif event_type == "RAW_RIR_DATA" and (
             module == "sfp_venmo" or "profile_picture_url" in data
         ):
             record = venmo_capture_from_raw(data, scan_id, scan_name)
@@ -283,7 +359,13 @@ def finalize_capture(record: dict, fetcher, timeout: int = 15, useragent: str = 
         html = page.get("content") if isinstance(page, dict) else None
         if isinstance(html, bytes):
             html = html.decode("utf-8", errors="ignore")
-        image_url = extract_og_image(html or "")
+        if (record.get("platform") or "") == "cashapp":
+            profile = cashapp_profile_from_html(html or "")
+            if profile:
+                record["display_name"] = profile.get("display_name") or record.get("display_name")
+                image_url = cashapp_avatar_url(profile)
+        else:
+            image_url = extract_og_image(html or "")
         record["image_url"] = image_url
 
     if not image_url or is_placeholder_image(image_url):

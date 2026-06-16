@@ -22,7 +22,7 @@ from spiderfoot.profile_capture import (
 HIGH_SIGNAL_PLATFORMS = {
     "instagram", "tiktok", "twitter", "x.com", "youtube", "snapchat",
     "allmylinks", "linktr.ee", "beacons.ai", "carrd.co", "github",
-    "reddit", "facebook", "threads.net", "bsky.app", "discord", "venmo",
+    "reddit", "facebook", "threads.net", "bsky.app", "discord", "venmo", "cashapp",
 }
 
 LINK_HUB_KEYWORDS = ("allmylinks", "linktr.ee", "beacons", "carrd.co", "bio.link", "hoo.be")
@@ -277,7 +277,7 @@ def build_profile_captures(events: list, on_stage=None) -> tuple:
     prioritized = sorted(
         candidates,
         key=lambda item: (
-            0 if item.get("platform") == "venmo" or item.get("image_url") else 1,
+            0 if item.get("platform") in ("venmo", "cashapp") or item.get("image_url") else 1,
             item.get("platform") or "",
         ),
     )

@@ -13,6 +13,7 @@ import json
 
 from spiderfoot import SpiderFootEvent, SpiderFootPlugin
 from spiderfoot.profile_capture import (
+    cashapp_capture_from_raw,
     extract_url,
     finalize_capture,
     platform_from_url,
@@ -91,7 +92,9 @@ class sfp_profilecapture(SpiderFootPlugin):
 
         record = None
 
-        if event_name == "RAW_RIR_DATA" and event.module == "sfp_venmo":
+        if event_name == "RAW_RIR_DATA" and event.module == "sfp_cashapp":
+            record = cashapp_capture_from_raw(event_data, scan_id, scan_name)
+        elif event_name == "RAW_RIR_DATA" and event.module == "sfp_venmo":
             record = venmo_capture_from_raw(event_data, scan_id, scan_name)
         elif event_name in ("ACCOUNT_EXTERNAL_OWNED", "SOCIAL_MEDIA"):
             url = extract_url(event_data)
