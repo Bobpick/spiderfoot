@@ -10,6 +10,8 @@ var llmStageProgress = {
     "loading_scans": 30,
     "merging_scans": 45,
     "condensing_data": 55,
+    "capturing_profiles": 62,
+    "comparing_images": 68,
     "calling_ollama": 75,
     "rendering_report": 90,
     "saving_report": 95,
@@ -30,6 +32,10 @@ function resetLLMModal() {
     $("#llm-progress-bar").css("width", "10%").removeClass("progress-bar-success progress-bar-danger").addClass("active progress-bar-striped");
     $("#llm-progress-label").text("10%");
     $("#llm-result-box").hide().text("");
+    $("#llm-captures-panel").hide();
+    $("#llm-captures-grid").empty();
+    $("#llm-captures-summary").text("");
+    $("#llm-visual-matches").hide().empty();
     $("#llm-report-panel").hide();
     $("#llm-report-content").empty();
     $("#llm-report-path").text("");
@@ -141,6 +147,85 @@ function formatInlineMarkdown(text) {
     return escaped;
 }
 
+function renderCaptureGallery(captures, visualMatches) {
+    if (!captures || !captures.length) {
+        return;
+    }
+
+    $("#llm-captures-panel").show();
+    $("#llm-captures-summary").text(
+        captures.length + " profile image(s) captured" +
+        (visualMatches && visualMatches.length ? (", " + visualMatches.length + " visual match(es) found") : "")
+    );
+
+    var matchedPaths = {};
+    if (visualMatches && visualMatches.length) {
+        visualMatches.forEach(function(match) {
+            if (match.left && match.left.web_path) {
+                matchedPaths[match.left.web_path] = match.confidence;
+            }
+            if (match.right && match.right.web_path) {
+                matchedPaths[match.right.web_path] = match.confidence;
+            }
+        });
+    }
+
+    var grid = $("#llm-captures-grid");
+    grid.empty();
+
+    captures.forEach(function(cap) {
+        var label = cap.display_name || cap.username || cap.scan_name || "profile";
+        var card = $("<div/>").addClass("llm-capture-card");
+        if (matchedPaths[cap.web_path]) {
+            card.addClass("llm-capture-match-" + matchedPaths[cap.web_path]);
+        }
+
+        var image = $("<img/>")
+            .attr("src", docroot + cap.web_path)
+            .attr("alt", label)
+            .attr("title", label);
+
+        var meta = $("<div/>").addClass("llm-capture-meta");
+        meta.append($("<strong/>").text(cap.scan_name || "scan"));
+        meta.append($("<span/>").text((cap.platform || "site") + " / " + label));
+
+        if (cap.profile_url) {
+            meta.append(
+                $("<a/>")
+                    .attr("href", cap.profile_url)
+                    .attr("target", "_blank")
+                    .attr("rel", "noopener")
+                    .text("Open profile")
+            );
+        }
+
+        card.append(image);
+        card.append(meta);
+        grid.append(card);
+    });
+
+    if (visualMatches && visualMatches.length) {
+        var matchesBox = $("#llm-visual-matches");
+        matchesBox.show().empty();
+        matchesBox.append($("<strong/>").text("Likely visual matches"));
+        var list = $("<ul/>");
+        visualMatches.slice(0, 12).forEach(function(match) {
+            var left = match.left || {};
+            var right = match.right || {};
+            list.append(
+                $("<li/>").html(
+                    "<strong>" + escapeHtml(match.confidence || "match") + "</strong> " +
+                    "distance " + escapeHtml(String(match.distance)) + ": " +
+                    escapeHtml(left.scan_name || "") + " / " + escapeHtml(left.platform || "") +
+                    " vs " +
+                    escapeHtml(right.scan_name || "") + " / " + escapeHtml(right.platform || "")
+                )
+            );
+        });
+        matchesBox.append(list);
+    }
+}
+
 function loadLLMReportInModal(jobId, status) {
     var downloadUrl = docroot + "/scananalyzellmdownload?jobid=" + encodeURIComponent(jobId);
 
@@ -170,6 +255,7 @@ function loadLLMReportInModal(jobId, status) {
             $("#llm-report-download-link").text(view.filename);
         }
 
+        renderCaptureGallery(view.captures || [], view.visual_matches || []);
         $("#llm-report-content").html(renderSimpleMarkdown(view.markdown));
     }).fail(function(xhr) {
         var msg = parseLLMError(xhr, "Could not load report preview.");

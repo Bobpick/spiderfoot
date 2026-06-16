@@ -47,6 +47,8 @@ class LLMJobManager:
                 "filename": None,
                 "filepath": None,
                 "result": None,
+                "captures": [],
+                "visual_matches": [],
             }
 
         thread = threading.Thread(
@@ -81,6 +83,8 @@ class LLMJobManager:
                 "filename": job.get("filename"),
                 "filepath": job.get("filepath"),
                 "markdown": job.get("result"),
+                "captures": job.get("captures", []),
+                "visual_matches": job.get("visual_matches", []),
             }
 
     def _update(self, job_id: str, **fields) -> None:
@@ -130,13 +134,17 @@ class LLMJobManager:
 
         try:
             dbh = SpiderFootDb(db_config)
-            markdown = analyze_scans(
+            result = analyze_scans(
                 dbh,
                 scan_ids,
                 context=context,
                 model=model,
                 on_stage=on_stage,
             )
+            if isinstance(result, tuple):
+                markdown, metadata = result
+            else:
+                markdown, metadata = result, {}
         except Exception as e:
             self._update(
                 job_id,
@@ -158,6 +166,8 @@ class LLMJobManager:
             result=markdown,
             filename=filename,
             filepath=str(filepath),
+            captures=metadata.get("captures", []),
+            visual_matches=metadata.get("visual_matches", []),
         )
 
     def cleanup_old_jobs(self, max_age_seconds: int = 3600) -> None:

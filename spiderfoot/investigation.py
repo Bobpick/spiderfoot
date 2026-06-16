@@ -10,11 +10,19 @@ from collections import defaultdict
 from datetime import datetime
 from urllib.parse import urlparse
 
+from spiderfoot.profile_capture import (
+    MAX_CAPTURES_PER_ANALYSIS,
+    collect_capture_candidates,
+    finalize_capture,
+    find_visual_matches,
+    render_visual_comparison_markdown,
+)
+
 
 HIGH_SIGNAL_PLATFORMS = {
     "instagram", "tiktok", "twitter", "x.com", "youtube", "snapchat",
     "allmylinks", "linktr.ee", "beacons.ai", "carrd.co", "github",
-    "reddit", "facebook", "threads.net", "bsky.app", "discord",
+    "reddit", "facebook", "threads.net", "bsky.app", "discord", "venmo",
 }
 
 LINK_HUB_KEYWORDS = ("allmylinks", "linktr.ee", "beacons", "carrd.co", "bio.link", "hoo.be")
@@ -226,8 +234,89 @@ def condense_report(report: dict, max_accounts_per_scan: int = 40) -> dict:
     return brief
 
 
-def build_analysis_prompt(brief: dict, context: str = "") -> str:
+def _http_fetcher(url: str, timeout: int = 15, useragent: str = "SpiderFoot") -> dict:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": useragent},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content = resp.read()
+            if isinstance(content, bytes):
+                try:
+                    content = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    pass
+            return {"content": content}
+    except urllib.error.URLError:
+        return {"content": None}
+
+
+def build_profile_captures(events: list, on_stage=None) -> tuple:
+    def stage(name: str, message: str) -> None:
+        if on_stage:
+            on_stage(name, message)
+
+    stage("capturing_profiles", "Collecting profile images from account hits...")
+    candidates = collect_capture_candidates(events)
+    captures = []
+    existing = {}
+
+    for item in events:
+        if item.get("type") != "RAW_RIR_DATA":
+            continue
+        try:
+            payload = json.loads(item.get("data", ""))
+        except json.JSONDecodeError:
+            continue
+        if payload.get("type") == "profile_capture" and payload.get("web_path"):
+            captures.append(payload)
+            existing[payload.get("web_path")] = payload
+
+    prioritized = sorted(
+        candidates,
+        key=lambda item: (
+            0 if item.get("platform") == "venmo" or item.get("image_url") else 1,
+            item.get("platform") or "",
+        ),
+    )
+
+    for record in prioritized:
+        if len(captures) >= MAX_CAPTURES_PER_ANALYSIS:
+            break
+
+        if record.get("image_url") and any(
+            cap.get("image_url") == record.get("image_url")
+            and cap.get("scan_id") == record.get("scan_id")
+            for cap in captures
+        ):
+            continue
+
+        try:
+            saved = finalize_capture(record, _http_fetcher)
+        except Exception:
+            saved = None
+
+        if saved and saved.get("web_path") not in existing:
+            captures.append(saved)
+            existing[saved.get("web_path")] = saved
+
+    stage("comparing_images", f"Comparing {len(captures)} profile image(s)...")
+    matches = find_visual_matches(captures)
+    return captures, matches
+
+
+def build_analysis_prompt(brief: dict, context: str = "", visual_matches: list = None) -> str:
     payload = json.dumps(brief, indent=2, ensure_ascii=False)
+    visual_summary = ""
+    if visual_matches:
+        visual_summary = (
+            "\nVisual profile image matches were detected across scans. "
+            "Treat close visual matches as medium/high-confidence identity bridges, "
+            "but still verify manually.\n"
+            f"Visual matches JSON:\n{json.dumps(visual_matches[:25], indent=2, ensure_ascii=False)}\n"
+        )
     return f"""You are assisting with defensive/educational OSINT review on a private offline system.
 
 An investigator selected multiple SpiderFoot scans that may relate to the same individual using
@@ -249,7 +338,7 @@ Rules:
   Likely False Positives, Recommended Next Steps, Open Questions.
 
 {f"Investigator notes: {context}" if context else ""}
-
+{visual_summary}
 Investigation data (condensed JSON):
 {payload}
 """
@@ -318,8 +407,11 @@ def render_analysis_markdown(
     report: dict,
     model: str,
     context: str = "",
+    captures: list = None,
+    visual_matches: list = None,
 ) -> str:
     scan_names = ", ".join(s["name"] for s in report.get("scans", []))
+    visual_section = render_visual_comparison_markdown(captures or [], visual_matches or [])
     return f"""# SpiderFoot LLM Investigation Analysis
 
 - Model: `{model}`
@@ -327,11 +419,13 @@ def render_analysis_markdown(
 - Scans merged: {scan_names}
 - Total events: {report.get("summary", {}).get("event_count", 0)}
 - Cross-scan correlations: {report.get("summary", {}).get("correlation_count", 0)}
+- Profile images captured: {len(captures or [])}
+- Visual matches found: {len(visual_matches or [])}
 {f"- Investigator notes: {context}" if context else ""}
 
 ---
 
-{analysis}
+{visual_section}{analysis}
 """
 
 
@@ -358,9 +452,43 @@ def analyze_scans(
         f"Merged {report['summary']['event_count']} events from {report['summary']['scan_count']} scan(s)...",
     )
     brief = condense_report(report)
+    captures, visual_matches = build_profile_captures(_flatten_events(report), on_stage=stage)
+    brief["profile_captures"] = [
+        {
+            "scan_name": cap.get("scan_name"),
+            "platform": cap.get("platform"),
+            "profile_url": cap.get("profile_url"),
+            "web_path": cap.get("web_path"),
+            "display_name": cap.get("display_name"),
+            "phash": cap.get("phash"),
+        }
+        for cap in captures
+    ]
+    brief["visual_matches"] = visual_matches
     stage("condensing_data", "Condensing account hits for LLM prompt...")
-    prompt = build_analysis_prompt(brief, context)
+    prompt = build_analysis_prompt(brief, context, visual_matches)
     stage("calling_ollama", f"Calling Ollama model '{model}' (watch CPU/GPU sensors)...")
     analysis = call_ollama(prompt, model=model, host=host, timeout=timeout)
     stage("rendering_report", "Formatting analysis report...")
-    return render_analysis_markdown(analysis, report, model, context)
+    markdown = render_analysis_markdown(
+        analysis,
+        report,
+        model,
+        context,
+        captures=captures,
+        visual_matches=visual_matches,
+    )
+    return markdown, {
+        "captures": captures,
+        "visual_matches": visual_matches,
+    }
+
+
+def _flatten_events(report: dict) -> list:
+    events = []
+    for event_type, rows in report.get("events_by_type", {}).items():
+        for row in rows:
+            item = dict(row)
+            item["type"] = event_type
+            events.append(item)
+    return events

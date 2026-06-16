@@ -37,7 +37,7 @@
 
 % endif
 
-<script type='text/javascript' src="${docroot}/static/js/spiderfoot.scanlist.js?v=llm6"></script>
+<script type='text/javascript' src="${docroot}/static/js/spiderfoot.scanlist.js?v=llm7"></script>
 </div>
 
 <iframe class='hidden' id='exportframe'></iframe>
@@ -70,6 +70,12 @@
           Watch your sensors while this modal stays open.
         </p>
         <div id="llm-result-box" class="alert alert-success" style="display:none; margin-top: 15px;"></div>
+        <div id="llm-captures-panel" style="display:none; margin-top: 15px;">
+          <strong>Profile Images</strong>
+          <p id="llm-captures-summary" class="text-muted" style="margin-top: 8px;"></p>
+          <div id="llm-captures-grid" class="llm-captures-grid"></div>
+          <div id="llm-visual-matches" class="llm-visual-matches" style="display:none; margin-top: 12px;"></div>
+        </div>
         <div id="llm-report-panel" style="display:none; margin-top: 15px;">
           <div class="llm-report-toolbar">
             <strong>Report:</strong>

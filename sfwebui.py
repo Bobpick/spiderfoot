@@ -769,6 +769,8 @@ class SpiderFootWebUi:
             "filename": view.get("filename"),
             "filepath": view.get("filepath"),
             "markdown": view.get("markdown"),
+            "captures": view.get("captures", []),
+            "visual_matches": view.get("visual_matches", []),
         }).encode('utf-8')
 
     @cherrypy.expose

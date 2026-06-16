@@ -1,6 +1,8 @@
 # SpiderFoot specific #
 #######################
 /cache/
+/captures/
+/reports/
 /log/
 /spiderfoot.db*
 passwd

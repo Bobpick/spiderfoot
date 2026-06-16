@@ -520,6 +520,11 @@ def start_web_server(sfWebUiConfig: dict, sfConfig: dict, loggingQueue=None) -> 
             'tools.staticdir.on': True,
             'tools.staticdir.dir': 'static',
             'tools.staticdir.root': f"{os.path.dirname(os.path.abspath(__file__))}/spiderfoot"
+        },
+        '/captures': {
+            'tools.staticdir.on': True,
+            'tools.staticdir.dir': 'captures',
+            'tools.staticdir.root': os.path.dirname(os.path.abspath(__file__))
         }
     }
 

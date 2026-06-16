@@ -51,7 +51,7 @@ def main():
             print(f"Wrote prompt to {prompt_path}")
             return
 
-        markdown = analyze_scans(
+        result = analyze_scans(
             dbh,
             [x.strip() for x in args.ids.split(",") if x.strip()],
             context=args.context,
@@ -59,6 +59,7 @@ def main():
             host=args.host,
             timeout=args.timeout,
         )
+        markdown = result[0] if isinstance(result, tuple) else result
         out.write_text(markdown, encoding="utf-8")
         print(f"Wrote {out}")
         return
